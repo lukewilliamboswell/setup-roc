@@ -101,21 +101,144 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup Roc
+        id: roc
         uses: ./
         with:
           version: ${{ matrix.version }}
           nightly-tag: ${{ matrix.nightly-tag }}
 
-      - name: Check Roc version
-        run: roc version
+      - name: Check Roc version and outputs
+        shell: bash
+        env:
+          ROC_EXECUTABLE: ${{ steps.roc.outputs.executable }}
+          ROC_INSTALL_DIR: ${{ steps.roc.outputs.install-dir }}
+          ROC_RESOLVED_VERSION: ${{ steps.roc.outputs.resolved-version }}
+        run: |
+          set -euo pipefail
+          test -n "$ROC_RESOLVED_VERSION"
+          test -d "$ROC_INSTALL_DIR"
+          test -f "$ROC_EXECUTABLE"
+          roc version
 
       - name: Download HelloWorld example (old compiler)
         if: matrix.version != 'nightly-new-compiler'
-        run: curl -fsSL -o main.roc https://raw.githubusercontent.com/roc-lang/examples/main/examples/HelloWorld/main.roc
+        run: curl -fsSL -o main.roc https://raw.githubusercontent.com/roc-lang/examples/75ccb5718653b903330ede4063710cfba80e5c40/examples/HelloWorld/main.roc
 
       - name: Download HelloWorld example (new compiler)
         if: matrix.version == 'nightly-new-compiler'
         run: curl -fsSL -o main.roc https://raw.githubusercontent.com/roc-lang/nightlies/main/hello_world_test.roc
 
+      - name: Update HelloWorld compiler pin to latest
+        if: matrix.version == 'nightly-new-compiler' && !matrix.nightly-tag
+        run: roc fmt main.roc
+
       - name: Run HelloWorld example
         run: roc main.roc
+
+  dual:
+    name: Test stable and nightly on ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: Linux
+            arch: x86_64
+            runner: ubuntu-latest
+          - os: Linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - os: macOS
+            arch: x86_64
+            runner: macos-15-intel
+          - os: macOS
+            arch: arm64
+            runner: macos-latest
+          - os: Windows
+            arch: x86_64
+            runner: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup stable and nightly Roc
+        id: roc
+        uses: ./
+        with:
+          version: stable-and-nightly
+
+      - name: Verify dual installation
+        shell: bash
+        env:
+          STABLE_OUTPUT: ${{ steps.roc.outputs.stable-executable }}
+          NIGHTLY_OUTPUT: ${{ steps.roc.outputs.nightly-executable }}
+          STABLE_TAG_OUTPUT: ${{ steps.roc.outputs.stable-tag }}
+          NIGHTLY_TAG_OUTPUT: ${{ steps.roc.outputs.nightly-tag }}
+        run: |
+          set -euo pipefail
+          test "$STABLE_OUTPUT" = "$ROC_STABLE"
+          test "$NIGHTLY_OUTPUT" = "$ROC_NIGHTLY"
+          test "$STABLE_TAG_OUTPUT" = "$ROC_STABLE_TAG"
+          test "$NIGHTLY_TAG_OUTPUT" = "$ROC_NIGHTLY_TAG"
+          test -f "$ROC_STABLE"
+          test -f "$ROC_NIGHTLY"
+          roc-stable version
+          roc-nightly version
+          "$ROC_STABLE" version
+          "$ROC_NIGHTLY" version
+
+      - name: Verify stable shebang
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          printf '#!/usr/bin/env roc-stable\n' > stable-script.roc
+          printf 'app [main!] { pf: platform "https://github.com/lukewilliamboswell/roc-platform-template-zig/releases/download/1.0.0/AnZoxzoGPtSGQ15EQh6pBeeaHJ7aizP9MQhK81dES3Uq.tar.zst", roc: "nightly-2026-09-10-a670e34" }\n' >> stable-script.roc
+          printf 'import pf.Stdout\nmain! = |_args| Stdout.line!("stable")\n' >> stable-script.roc
+          chmod +x stable-script.roc
+          ./stable-script.roc
+
+      - name: Verify dual aliases from PowerShell
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          roc-stable version
+          roc-nightly version
+
+  stable:
+    name: Test stable only on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup stable Roc
+        id: roc
+        uses: ./
+        with:
+          version: stable
+
+      - name: Verify stable installation
+        shell: bash
+        env:
+          STABLE_TAG_OUTPUT: ${{ steps.roc.outputs.stable-tag }}
+          STABLE_EXECUTABLE_OUTPUT: ${{ steps.roc.outputs.stable-executable }}
+          STABLE_INSTALL_DIR_OUTPUT: ${{ steps.roc.outputs.stable-install-dir }}
+          GENERIC_EXECUTABLE_OUTPUT: ${{ steps.roc.outputs.executable }}
+        run: |
+          set -euo pipefail
+          test "$STABLE_TAG_OUTPUT" = "$ROC_STABLE_TAG"
+          test "$STABLE_EXECUTABLE_OUTPUT" = "$ROC_STABLE"
+          test "$STABLE_INSTALL_DIR_OUTPUT" = "$ROC_STABLE_INSTALL_DIR"
+          test "$GENERIC_EXECUTABLE_OUTPUT" = "$ROC_STABLE"
+          test -f "$ROC_STABLE"
+          roc-stable version
+          roc version
+
+      - name: Verify stable alias from PowerShell
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: roc-stable version
